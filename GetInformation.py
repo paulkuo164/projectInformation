@@ -5,89 +5,74 @@ import datetime
 import requests
 from urllib.parse import quote
 
-# 頁面基本設定
-st.set_page_config(page_title="HURC API Debugger", layout="centered")
-st.title("🏗️ HURC PMIS API 驗證測試器")
+st.set_page_config(page_title="HURC API 診斷工具", layout="wide")
 
-# --- 側邊欄輸入區 ---
+# --- 第一部分：IP 診斷 ---
+st.header("🌐 環境診斷 (IP Check)")
+try:
+    # 透過外部服務取得目前 Streamlit 執行環境的公網 IP
+    public_ip = requests.get('https://api64.ipify.org?format=json', timeout=5).json()['ip']
+    st.info(f"目前 Streamlit Cloud 的出口 IP 為: **{public_ip}**")
+    st.caption("💡 如果這個 IP 不在貴單位的白名單內，API 連線將會失敗。")
+except Exception as e:
+    st.error(f"無法取得目前 IP: {e}")
+
+st.divider()
+
+# --- 第二部分：API 測試邏輯 ---
+st.header("🚀 API 連線測試")
+
 with st.sidebar:
-    st.header("1. 基礎參數設定")
-    host = st.text_input("HOST", value="https://pmis.hurc.org.tw")
-    system_name = st.text_input("SYSTEM 名稱", value="請輸入")
-    token_key = st.text_input("TOKEN KEY", value="", type="password")
-    project_id = st.text_input("PROJECT ID", value="214")
-    
-    st.divider()
-    st.header("2. 加密格式微調")
-    # 有些系統要求 JSON key 之間不能有空格，有些則要
-    compact_json = st.checkbox("使用緊湊格式 JSON (無空格)", value=False)
-    sort_keys = st.checkbox("依照字母順序排列 Key", value=False)
+    st.subheader("參數設定")
+    HOST = st.text_input("HOST", value="https://pmis.hurc.org.tw")
+    SYSTEM = st.text_input("SYSTEM 名稱")
+    TOKEN_KEY = st.text_input("TOKEN KEY", type="password")
+    PROJECT_ID = st.text_input("PROJECT ID", value="214")
 
-# --- 核心加密函數 ---
-def generate_token(sys, ts, key, compact, sort):
-    # 建構字典
-    data_dict = {"system": sys, "time": ts, "key": key}
-    
-    # 根據設定決定序列化方式
-    if compact:
-        # 結果範例: {"system":"A","time":"B","key":"C"}
-        raw_str = json.dumps(data_dict, separators=(',', ':'), sort_keys=sort)
-    else:
-        # 結果範例: {"system": "A", "time": "B", "key": "C"}
-        raw_str = json.dumps(data_dict, sort_keys=sort)
-        
+def generate_token(sys, ts, key):
+    # 這裡使用最緊湊的格式，這是大多數 API 的標準
+    data = json.dumps({"system": sys, "time": ts, "key": key}, separators=(',', ':'))
     m = hashlib.md5()
-    m.update(raw_str.encode("utf-8"))
-    sign = m.hexdigest().lower()
-    return sign, raw_str
+    m.update(data.encode("utf-8"))
+    return m.hexdigest().lower(), data
 
-# --- 主畫面操作 ---
-if st.button("🔍 開始偵錯連線", use_container_width=True):
-    if not token_key or system_name == "請輸入":
-        st.warning("⚠️ 請填寫完整的 SYSTEM 與 TOKEN KEY")
+if st.button("執行 API 測試"):
+    if not SYSTEM or not TOKEN_KEY:
+        st.warning("請填寫 SYSTEM 與 TOKEN KEY")
     else:
         now = datetime.datetime.now()
-        st.info(f"執行時間: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-        
         found = False
-        # 嘗試前後各 3 分鐘，覆蓋更大範圍
-        for delta in range(-3, 4):
-            ts = now + datetime.timedelta(minutes=delta)
+        
+        # 建立日誌容器
+        log_container = st.container()
+        
+        for delta in range(0, 6):
+            ts = now - datetime.timedelta(minutes=delta)
             ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
-            
-            token, debug_raw = generate_token(system_name, ts_str, token_key, compact_json, sort_keys)
+            token, raw_str = generate_token(SYSTEM, ts_str, TOKEN_KEY)
             ts_encoded = quote(ts_str, safe="")
-            test_url = f"{host}/rcm/api/v1/projectinfoapi/{project_id}/?system={system_name}&timestamp={ts_encoded}&token={token}"
+            url = f"{HOST}/rcm/api/v1/projectinfoapi/{PROJECT_ID}/?system={SYSTEM}&timestamp={ts_encoded}&token={token}"
             
             try:
-                # 這裡關閉 verify 以防證書問題，但在正式環境建議開啟
-                resp = requests.get(test_url, timeout=5, verify=False)
+                # 這裡增加 timeout 並關閉 verify 測試
+                resp = requests.get(url, timeout=5, verify=False)
                 
-                # 顯示每一次嘗試的日誌 (展開式)
-                with st.expander(f"嘗試時間: {ts_str} | 狀態: {resp.status_code}"):
-                    st.code(f"URL: {test_url}")
-                    st.write(f"**加密原始字串 (Payload):** `{debug_raw}`")
-                    st.write(f"**生成的 MD5 Token:** `{token}`")
+                with st.expander(f"測試時間 {ts_str} - 狀態碼: {resp.status_code}"):
+                    st.write(f"**Request URL:** `{url}`")
+                    st.write(f"**MD5 Payload:** `{raw_str}`")
                     
                     if resp.status_code == 200:
-                        st.success("🎉 成功取得資料！")
+                        st.success("✅ 連線成功！")
                         st.json(resp.text)
                         found = True
                         break
                     else:
-                        st.error(f"失敗。伺服器回傳內容: {resp.text}")
+                        st.error(f"連線失敗，伺服器回傳：{resp.text}")
                         
+            except requests.exceptions.ConnectTimeout:
+                st.error(f"❌ 時間 {ts_str}: **連線逾時 (Timeout)**。這通常代表 IP 被防火牆擋住，封包進不去。")
             except Exception as e:
-                st.error(f"連線異常: {e}")
-                break
-        
+                st.error(f"❌ 發生錯誤: {e}")
+                
         if not found:
-            st.error("❌ 所有時間點均驗證失敗。")
-            st.markdown("""
-            ### 💡 排除故障建議：
-            1. **檢查 Key 的順序**：嘗試勾選或取消「依照字母順序排列 Key」。
-            2. **檢查 JSON 空格**：嘗試勾選或取消「使用緊湊格式」。
-            3. **手動對時**：確認你的電腦時間與 [Time.is](https://time.is) 是否一致。
-            4. **確認 SYSTEM 名稱**：有些系統對大小寫敏感。
-            """)
-            
+            st.error("🏁 測試結束：未能成功取得資料。")
