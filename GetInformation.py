@@ -4,110 +4,90 @@ import hashlib
 import datetime
 import requests
 from urllib.parse import quote
-import time
 
-# --- 頁面配置 ---
-st.set_page_config(page_title="HURC API 偵錯工具", layout="wide")
+# 頁面基本設定
+st.set_page_config(page_title="HURC API Debugger", layout="centered")
+st.title("🏗️ HURC PMIS API 驗證測試器")
 
-st.title("🛠️ HURC PMIS API 整合測試工具")
-st.markdown("""
-此工具會自動嘗試當前時間 ±5 分鐘的 Token 驗證，解決伺服器與本機時間不一致導致的驗證失敗問題。
-""")
-
-# --- 側邊欄：參數設定 ---
+# --- 側邊欄輸入區 ---
 with st.sidebar:
-    st.header("🔑 憑證與設定")
-    HOST = st.text_input("主機網址", value="https://pmis.hurc.org.tw")
-    SYSTEM = st.text_input("系統名稱 (system)", value="")
-    TOKEN_KEY = st.text_input("驗證金鑰 (token_key)", value="", type="password")
-    PROJECT_ID = st.text_input("專案代碼 (project_id)", value="214")
+    st.header("1. 基礎參數設定")
+    host = st.text_input("HOST", value="https://pmis.hurc.org.tw")
+    system_name = st.text_input("SYSTEM 名稱", value="請輸入")
+    token_key = st.text_input("TOKEN KEY", value="", type="password")
+    project_id = st.text_input("PROJECT ID", value="214")
     
     st.divider()
-    st.header("⚙️ 進階選項")
-    timeout_val = st.number_input("連線逾時(秒)", value=10)
-    verify_ssl = st.checkbox("驗證 SSL 憑證", value=True)
-    show_debug = st.checkbox("顯示除錯詳細資訊", value=True)
+    st.header("2. 加密格式微調")
+    # 有些系統要求 JSON key 之間不能有空格，有些則要
+    compact_json = st.checkbox("使用緊湊格式 JSON (無空格)", value=False)
+    sort_keys = st.checkbox("依照字母順序排列 Key", value=False)
 
-# --- 核心邏輯 ---
-def generate_token(system, timestamp, key):
-    # 注意：這裡的 JSON 格式（空格、順序）必須與後端完全一致
-    payload_dict = {"system": system, "time": timestamp, "key": key}
-    data = json.dumps(payload_dict, separators=(',', ':')) # 移除多餘空格以確保雜湊一致性
+# --- 核心加密函數 ---
+def generate_token(sys, ts, key, compact, sort):
+    # 建構字典
+    data_dict = {"system": sys, "time": ts, "key": key}
     
+    # 根據設定決定序列化方式
+    if compact:
+        # 結果範例: {"system":"A","time":"B","key":"C"}
+        raw_str = json.dumps(data_dict, separators=(',', ':'), sort_keys=sort)
+    else:
+        # 結果範例: {"system": "A", "time": "B", "key": "C"}
+        raw_str = json.dumps(data_dict, sort_keys=sort)
+        
     m = hashlib.md5()
-    m.update(data.encode("utf-8"))
+    m.update(raw_str.encode("utf-8"))
     sign = m.hexdigest().lower()
-    return sign, data
+    return sign, raw_str
 
-# --- 主介面佈局 ---
-col_ctrl, col_res = st.columns([1, 2])
-
-with col_ctrl:
-    st.subheader("控制台")
-    run_btn = st.button("🚀 開始測試連線", use_container_width=True)
-    
-    if run_btn:
-        if not SYSTEM or not TOKEN_KEY:
-            st.error("請先填寫 SYSTEM 與 TOKEN_KEY")
-        else:
-            now = datetime.datetime.now()
-            st.write(f"🕒 本機時間: `{now.strftime('%Y-%m-%d %H:%M:%S')}`")
+# --- 主畫面操作 ---
+if st.button("🔍 開始偵錯連線", use_container_width=True):
+    if not token_key or system_name == "請輸入":
+        st.warning("⚠️ 請填寫完整的 SYSTEM 與 TOKEN KEY")
+    else:
+        now = datetime.datetime.now()
+        st.info(f"執行時間: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        found = False
+        # 嘗試前後各 3 分鐘，覆蓋更大範圍
+        for delta in range(-3, 4):
+            ts = now + datetime.timedelta(minutes=delta)
+            ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
             
-            success = False
-            results_log = []
+            token, debug_raw = generate_token(system_name, ts_str, token_key, compact_json, sort_keys)
+            ts_encoded = quote(ts_str, safe="")
+            test_url = f"{host}/rcm/api/v1/projectinfoapi/{project_id}/?system={system_name}&timestamp={ts_encoded}&token={token}"
             
-            progress_bar = st.progress(0)
-            
-            # 嘗試 ±5 分鐘（共 11 個時間點）
-            for i, delta in enumerate(range(0, 6)):
-                # 這裡目前僅實作往回推，若有需要可改為 range(-5, 6)
-                ts = now - datetime.timedelta(minutes=delta)
-                ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                # 這裡關閉 verify 以防證書問題，但在正式環境建議開啟
+                resp = requests.get(test_url, timeout=5, verify=False)
                 
-                # 生成 Token
-                token, raw_json = generate_token(SYSTEM, ts_str, TOKEN_KEY)
-                ts_encoded = quote(ts_str, safe="")
-                url = f"{HOST}/rcm/api/v1/projectinfoapi/{PROJECT_ID}/?system={SYSTEM}&timestamp={ts_encoded}&token={token}"
-                
-                progress_bar.progress((i + 1) / 6)
-                
-                try:
-                    resp = requests.get(url, timeout=timeout_val, verify=verify_ssl)
-                    status_code = resp.status_code
+                # 顯示每一次嘗試的日誌 (展開式)
+                with st.expander(f"嘗試時間: {ts_str} | 狀態: {resp.status_code}"):
+                    st.code(f"URL: {test_url}")
+                    st.write(f"**加密原始字串 (Payload):** `{debug_raw}`")
+                    st.write(f"**生成的 MD5 Token:** `{token}`")
                     
-                    if status_code == 200:
-                        success = True
-                        st.balloons()
-                        with col_res:
-                            st.success(f"✅ 連線成功！ (時間點: {ts_str})")
-                            st.subheader("📦 API 回傳數據")
-                            try:
-                                st.json(resp.json())
-                            except:
-                                st.text_area("回傳非 JSON 文字", value=resp.text, height=300)
+                    if resp.status_code == 200:
+                        st.success("🎉 成功取得資料！")
+                        st.json(resp.text)
+                        found = True
                         break
                     else:
-                        results_log.append({"時間": ts_str, "狀態碼": status_code, "訊息": "驗證失敗或無權限"})
+                        st.error(f"失敗。伺服器回傳內容: {resp.text}")
                         
-                except Exception as e:
-                    st.error(f"連線發生錯誤: {str(e)}")
-                    break
+            except Exception as e:
+                st.error(f"連線異常: {e}")
+                break
+        
+        if not found:
+            st.error("❌ 所有時間點均驗證失敗。")
+            st.markdown("""
+            ### 💡 排除故障建議：
+            1. **檢查 Key 的順序**：嘗試勾選或取消「依照字母順序排列 Key」。
+            2. **檢查 JSON 空格**：嘗試勾選或取消「使用緊湊格式」。
+            3. **手動對時**：確認你的電腦時間與 [Time.is](https://time.is) 是否一致。
+            4. **確認 SYSTEM 名稱**：有些系統對大小寫敏感。
+            """)
             
-            if not success:
-                st.error("❌ 所有時間點嘗試均失敗")
-                with col_res:
-                    st.warning("除錯建議：")
-                    st.markdown("""
-                    1. **檢查 Token 格式**：確認 JSON 字串中的 Key 順序是否正確。
-                    2. **檢查網址**：確認 `PROJECT_ID` 是否存在。
-                    3. **防火牆/IP**：確認您的 IP 是否在該 API 的允許清單內。
-                    """)
-                    if show_debug:
-                        st.subheader("🔍 嘗試紀錄")
-                        st.table(results_log)
-
-else:
-    with col_res:
-        st.info("💡 請在左側輸入參數並按下「開始測試連線」。")
-        # 這裡可以放一個示意圖說明 API 驗證流程
-        #
