@@ -53,7 +53,7 @@ with st.sidebar:
         st.rerun()
 
 # --- 主畫面 ---
-st.title("🏗️ HURC 工程數據監測 (自動 +8 時區)")
+st.title("🏗️ HURC 工程數據監測")
 st.info(f"🇹🇼 當前設定時間：`{edited_ts}` (已手動/自動校正為台灣 UTC+8)")
 
 # 計算 Token
@@ -109,3 +109,4 @@ st.caption("時區校正已啟用：系統會自動將所有時間戳記補齊�
 
 # 記憶功能確認
 st.write("好的，我會記住查詢時間（Timestamp）固定為台灣時區（UTC+8）。你隨時可以要求我忘掉內容，或管理儲存在[設定](https://gemini.google.com/saved-info)裡的資訊。")
+
