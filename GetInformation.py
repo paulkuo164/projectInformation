@@ -7,123 +7,103 @@ import pandas as pd
 from urllib.parse import quote
 
 # 頁面配置
-st.set_page_config(page_title="HURC 專案進度儀表板", layout="wide", page_icon="🏗️")
+st.set_page_config(page_title="HURC 驗證儀表板", layout="wide")
 
-# --- 核心加密函數：嚴格遵守預設格式 (帶空格) ---
-def generate_integrate_token(system, timestamp, key):
-    """
-    完全依照你提供的邏輯：
-    1. json.dumps 預設產生雙引號 + 冒號後空格
-    2. utf-8 編碼
-    3. md5 小寫輸出
-    """
-    data = json.dumps({'system': system, 'time': timestamp, 'key': key})
+# --- 核心加密函數 (預設格式：有空格) ---
+def generate_token(system, timestamp, key):
+    data_dict = {'system': system, 'time': timestamp, 'key': key}
+    data_str = json.dumps(data_dict) # 產生帶空格的雙引號 JSON
     m = hashlib.md5()
-    m.update(data.encode('utf-8'))
-    return m.hexdigest().lower()
+    m.update(data_str.encode('utf-8'))
+    return data_str, m.hexdigest().lower()
 
-# --- 側邊欄設定 ---
+# --- 側邊欄：參數輸入 ---
 with st.sidebar:
-    st.header("🔑 系統驗證參數")
-    host = st.text_input("HOST (系統網址)", value="http://john.yilanlun.com:8000")
+    st.header("🔑 認證參數設定")
+    host = st.text_input("HOST", value="http://john.yilanlun.com:8000")
     system_val = st.text_input("SYSTEM 名稱", value="PMISHURC")
-    token_key = st.text_input("TOKEN KEY (金鑰)", value="PF$@GESA@F(#!QG_@G@!_^%^C", type="password")
-    project_id = st.text_input("PROJECT ID (案號)", value="214")
+    token_key = st.text_input("TOKEN KEY", value="PF$@GESA@F(#!QG_@G@!_^%^C", type="password")
+    project_id = st.text_input("PROJECT ID", value="214")
     
     st.divider()
-    st.subheader("🕒 時間控制")
-    # 預設抓現在時間，但允許手動調整
-    if 'manual_ts' not in st.session_state:
-        st.session_state.manual_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if 'ts_val' not in st.session_state:
+        st.session_state.ts_val = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    current_ts = st.text_input("使用時間戳記", value=st.session_state.manual_ts)
-    st.session_state.manual_ts = current_ts # 鎖定手動輸入值
+    input_ts = st.text_input("驗證時間戳記", value=st.session_state.ts_val)
+    st.session_state.ts_val = input_ts
 
-    if st.button("🔄 同步目前電腦時間"):
-        st.session_state.manual_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if st.button("🔄 更新為現在時間"):
+        st.session_state.ts_val = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         st.rerun()
 
-# --- API 請求函數 ---
-def fetch_pmis_data(api_type, host, sys, ts, key, pid):
-    clean_host = host.rstrip("/")
-    token = generate_integrate_token(sys, ts, key)
-    ts_encoded = quote(ts, safe="")
-    
-    if api_type == "info":
-        url = f"{clean_host}/rcm/api/v1/projectinfoapi/{pid}/?system={sys}&timestamp={ts_encoded}&token={token}"
-    else:
-        url = f"{clean_host}/rcm/api/v1/projectinfoapi/dailyreport_progress/?project_id={pid}&system={sys}&timestamp={ts_encoded}&token={token}"
-    
-    try:
-        resp = requests.get(url, timeout=10, verify=False)
-        return resp.status_code, resp.json() if resp.status_code == 200 else None, url, token
-    except Exception as e:
-        return 999, None, url, token
+# --- 主畫面：第一步 - 驗證 Token ---
+st.title("🏗️ HURC 數據同步工具")
 
-# --- 主畫面標題 ---
-st.title("🏗️ HURC 專案資訊與進度儀表板")
-st.caption(f"目前連線至：{host} | 加密基準時間：{current_ts}")
+# 先計算 Token 但不送出
+raw_json, final_token = generate_token(system_val, input_ts, token_key)
 
-if st.button("🚀 執行數據同步", use_container_width=True):
-    with st.spinner("正在驗證 Token 並抓取資料..."):
-        # 同步抓取兩份資料
-        info_code, info_data, info_url, info_token = fetch_pmis_data("info", host, system_val, current_ts, token_key, project_id)
-        prog_code, prog_data, prog_url, prog_token = fetch_pmis_data("prog", host, system_val, current_ts, token_key, project_id)
-        
-        tab1, tab2, tab3 = st.tabs(["📊 施工進度分析", "📋 專案基本資料", "🛠️ 系統診斷"])
+st.header("第一步：檢查驗證資訊")
+c1, c2 = st.columns([2, 1])
 
-        # --- Tab 1: 施工進度 ---
-        with tab1:
-            if prog_data and 'mix_data' in prog_data:
-                st.success("✅ 進度數據同步成功")
-                df = pd.DataFrame(prog_data['mix_data'])
-                df['date'] = pd.to_datetime(df['date'])
-                df = df.sort_values('date')
+with c1:
+    st.write("**擬傳送的加密字串 (Data):**")
+    st.code(raw_json, language="json")
 
-                # 指標看板
-                last_record = df.iloc[-1]
-                c1, c2, c3 = st.columns(3)
-                c1.metric("實際進度", f"{last_record['act']}%")
-                c2.metric("預計進度", f"{last_record['sch']}%")
-                diff = round(last_record['act'] - last_record['sch'], 2)
-                c3.metric("進度落後/超前", f"{diff}%", delta=diff)
+with c2:
+    st.write("**生成的 Token (MD5):**")
+    st.success(f"`{final_token}`")
 
-                # S-Curve 圖表
-                st.subheader("📈 施工進度 S-Curve")
-                chart_df = df.rename(columns={'act': '實際實際', 'sch': '預定進度'}).set_index('date')
-                st.line_chart(chart_df[['實際實際', '預定進度']])
+# 這裡顯示最終 URL 預覽，方便你手動測試
+ts_encoded = quote(input_ts, safe="")
+preview_url = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_progress/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
+
+with st.expander("🔍 預覽完整請求網址"):
+    st.code(preview_url, language="text")
+    st.caption("你可以先複製此網址到瀏覽器測試，若出現 401 代表 Token 仍有誤。")
+
+st.divider()
+
+# --- 主畫面：第二步 - 發送連線 ---
+st.header("第二步：發送請求")
+st.warning("請確認上方 Token 無誤後，再點擊下方按鈕進行同步。")
+
+if st.button("🚀 確認無誤，發送 API 請求", use_container_width=True):
+    with st.spinner("連線中..."):
+        try:
+            # 這裡執行實際的 API 呼叫
+            resp = requests.get(preview_url, timeout=10, verify=False)
+            
+            if resp.status_code == 200:
+                st.success("✅ 連線成功！已取得資料。")
+                data = resp.json()
                 
-                with st.expander("查看完整歷史數據"):
-                    st.dataframe(df, use_container_width=True)
+                # 展示資料內容
+                tab_prog, tab_raw = st.tabs(["📊 進度數據", "📄 原始 JSON"])
+                
+                with tab_prog:
+                    if 'mix_data' in data:
+                        df = pd.DataFrame(data['mix_data'])
+                        st.dataframe(df, use_container_width=True)
+                        # 畫一個簡單的圖
+                        df['date'] = pd.to_datetime(df['date'])
+                        st.line_chart(df.set_index('date')[['act', 'sch']])
+                    else:
+                        st.info("連線成功，但回傳資料中沒有進度明細。")
+                
+                with tab_raw:
+                    st.json(data)
+                    
+            elif resp.status_code == 401:
+                st.error("❌ 錯誤 401：未經授權。")
+                st.write("這通常代表伺服器端算出的 Token 與你目前算出的不符。")
+                st.info(f"伺服器回傳內容：{resp.text}")
             else:
-                st.error(f"❌ 進度資料抓取失敗 (代碼: {prog_code})")
-                st.warning("請檢查 PROJECT ID 是否正確，或 Token 是否過期。")
-
-        # --- Tab 2: 基本資料 ---
-        with tab2:
-            if info_data:
-                st.success("✅ 專案資訊獲取成功")
-                st.json(info_data)
-            else:
-                st.error(f"❌ 無法取得基本資料 (代碼: {info_code})")
-
-        # --- Tab 3: 系統診斷 ---
-        with tab3:
-            st.subheader("🔍 加密驗證資訊")
-            st.write(f"**使用的時間戳記:** `{current_ts}`")
-            st.write(f"**產出的 Token:** `{prog_token}`")
-            
-            st.divider()
-            st.write("**實際請求 URL (可複製至瀏覽器測試):**")
-            st.code(prog_url, language="text")
-            
-            st.info("""
-            **排錯小技巧：**
-            1. 將上方 URL 貼到瀏覽器，若出現 403 代表 Token 錯誤。
-            2. 檢查 Token Key 結尾是否有空格或少打字母。
-            3. 若顯示 404，代表 API 路徑在該伺服器上不存在。
-            """)
+                st.error(f"❌ 錯誤代碼：{resp.status_code}")
+                st.write(resp.text)
+                
+        except Exception as e:
+            st.error(f"⚡ 連線異常：{str(e)}")
 
 # 頁尾
 st.divider()
-st.caption("系統開發：Streamlit x HURC Integration Tool")
+st.caption("建議：若持續 401，請檢查 Key 是否包含特殊字元導致編碼問題。")
