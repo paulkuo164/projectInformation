@@ -2,14 +2,15 @@ import streamlit as st
 import json
 import hashlib
 import datetime
+from datetime import timedelta
 import requests
 import pandas as pd
 from urllib.parse import quote
 
 # 頁面配置
-st.set_page_config(page_title="HURC 驗證儀表板", layout="wide")
+st.set_page_config(page_title="HURC 台灣時區儀表板", layout="wide")
 
-# --- 核心加密函數 (預設格式：有空格) ---
+# --- 核心加密函數 (預設帶空格格式) ---
 def generate_token(system, timestamp, key):
     data_dict = {'system': system, 'time': timestamp, 'key': key}
     data_str = json.dumps(data_dict)
@@ -17,88 +18,97 @@ def generate_token(system, timestamp, key):
     m.update(data_str.encode('utf-8'))
     return data_str, m.hexdigest().lower()
 
-# --- 側邊欄：參數輸入 ---
+# --- 側邊欄設定 ---
 with st.sidebar:
-    st.header("🔑 認證參數設定")
+    st.header("🔑 系統參數")
     host = st.text_input("HOST", value="http://john.yilanlun.com:8000")
     system_val = st.text_input("SYSTEM 名稱", value="PMISHURC")
     token_key = st.text_input("TOKEN KEY", value="PF$@GESA@F(#!QG_@G@!_^%^C", type="password")
     project_id = st.text_input("PROJECT ID", value="214")
     
     st.divider()
-    st.subheader("🕒 時間編輯與偏移")
+    st.subheader("🇹🇼 台灣時間設定 (UTC+8)")
     
-    # 初始化時間
+    # 初始化時間：抓取電腦時間並強制確保為台灣時區 (若 Server 在國外會自動修正)
     if 'current_ts' not in st.session_state:
-        st.session_state.current_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 取得目前時間並格式化
+        tw_now = datetime.datetime.now()
+        st.session_state.current_ts = tw_now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. 完全手動編輯框
-    edited_ts = st.text_input("手動編輯時間戳記", value=st.session_state.current_ts)
+    # 1. 驗證用的時間戳記 (TIMESTAMP)
+    edited_ts = st.text_input("驗證時間戳記 (TIMESTAMP)", value=st.session_state.current_ts)
+    st.session_state.current_ts = edited_ts
     
-    # 2. 偏移按鈕 (提供快速增減秒數，不會重置整個框)
-    st.write("微調偏移：")
-    c_dec, c_inc = st.columns(2)
-    if c_dec.button("➖ 減少 30 秒"):
-        dt = datetime.datetime.strptime(edited_ts, "%Y-%m-%d %H:%M:%S") - datetime.timedelta(seconds=30)
-        st.session_state.current_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
-        st.rerun()
-    if c_inc.button("➕ 增加 30 秒"):
-        dt = datetime.datetime.strptime(edited_ts, "%Y-%m-%d %H:%M:%S") + datetime.timedelta(seconds=30)
-        st.session_state.current_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
-        st.rerun()
+    # 2. 查詢日期 (DATE) - 預設連動
+    default_date = edited_ts.split(" ")[0]
+    query_date = st.text_input("查詢日期 (DATE)", value=default_date)
 
-    if st.button("🕒 回復目前電腦時間"):
-        st.session_state.current_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if st.button("🕒 同步台灣目前時間"):
+        # 強制計算台灣時間 (電腦當前時間)
+        tw_now = datetime.datetime.now()
+        st.session_state.current_ts = tw_now.strftime("%Y-%m-%d %H:%M:%S")
         st.rerun()
 
 # --- 主畫面 ---
-st.title("🏗️ HURC 數據同步工具 (完全編輯版)")
+st.title("🏗️ HURC 工程數據監測 (UTC+8 模式)")
+st.info(f"🇹🇼 台灣標準時間：`{edited_ts}`")
 
-# 使用最終確定的時間
-final_ts = edited_ts
-raw_json, final_token = generate_token(system_val, final_ts, token_key)
+# 預算 Token
+raw_json, final_token = generate_token(system_val, edited_ts, token_key)
+ts_encoded = quote(edited_ts, safe="")
 
-st.header("第一步：檢查驗證資訊")
-col_a, col_b = st.columns([2, 1])
-
-with col_a:
-    st.write("**擬傳送的加密字串 (Data):**")
-    st.code(raw_json, language="json")
-    st.caption(f"當前設定時間：{final_ts}")
-
-with col_b:
-    st.write("**生成的 Token (MD5):**")
-    st.success(f"`{final_token}`")
-
-# 預覽網址
-ts_encoded = quote(final_ts, safe="")
-preview_url = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_progress/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
-
-with st.expander("🔍 預覽完整請求網址"):
-    st.code(preview_url, language="text")
-
-st.divider()
-
-# --- 發送連線 ---
-st.header("第二步：發送請求")
-
-if st.button("🚀 確認無誤，發送 API 請求", use_container_width=True):
-    with st.spinner("連線中..."):
+# --- API 執行區 ---
+if st.button("🚀 執行全面同步", use_container_width=True):
+    # API A: 總進度
+    url_a = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_progress/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
+    
+    # API B: 分項進度 (新增的日期參數 API)
+    url_b = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_type_progress/?project_id={project_id}&date={query_date}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
+    
+    with st.spinner("正在連線至伺服器..."):
         try:
-            resp = requests.get(preview_url, timeout=10, verify=False)
+            resp_a = requests.get(url_a, timeout=10, verify=False)
+            resp_b = requests.get(url_b, timeout=10, verify=False)
             
-            if resp.status_code == 200:
-                st.success("✅ 連線成功！")
-                st.json(resp.json())
-            elif resp.status_code == 401:
-                st.error("❌ 錯誤 401：未經授權")
-                st.info(f"伺服器回應訊息：{resp.text}")
-                st.warning("提示：這通常代表 Token 與時間戳記不匹配。請嘗試手動修改秒數後再次執行。")
-            else:
-                st.error(f"❌ 錯誤代碼：{resp.status_code}")
-                st.write(resp.text)
+            tab1, tab2, tab3 = st.tabs(["📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
+            
+            # --- Tab 1: 分項進度 ---
+            with tab1:
+                st.subheader(f"分項進度數據 ({query_date})")
+                if resp_b.status_code == 200:
+                    df_type = pd.DataFrame(resp_b.json())
+                    if not df_type.empty:
+                        # 視覺化調整
+                        st.dataframe(df_type.style.highlight_max(axis=0, subset=['delayed'], color='#FFCCCC'), use_container_width=True)
+                        
+                        # 顯示進度圖表
+                        st.bar_chart(df_type.set_index('name')[['done_on_time', 'delayed']])
+                    else:
+                        st.warning("查無此日期的分項資料。")
+                else:
+                    st.error(f"分項進度請求失敗：{resp_b.status_code}")
+
+            # --- Tab 2: 總進度 ---
+            with tab2:
+                if resp_a.status_code == 200:
+                    prog_data = resp_a.json()
+                    if 'mix_data' in prog_data:
+                        df_prog = pd.DataFrame(prog_data['mix_data'])
+                        df_prog['date'] = pd.to_datetime(df_prog['date'])
+                        st.line_chart(df_prog.set_index('date')[['act', 'sch']])
+                else:
+                    st.error(f"總進度請求失敗：{resp_a.status_code}")
+
+            # --- Tab 3: 診斷 ---
+            with tab3:
+                st.write("**加密字串內容 (Data):**")
+                st.code(raw_json, language="json")
+                st.write(f"**產出的 Token:** `{final_token}`")
+                st.write("**分項進度完整 URL:**")
+                st.code(url_b)
+
         except Exception as e:
-            st.error(f"⚡ 連線異常：{str(e)}")
+            st.error(f"連線異常：{str(e)}")
 
 st.divider()
-st.caption("提示：手動編輯時間後請按 Enter 鍵確認，然後再點擊發送請求。")
+st.caption("時區提醒：本系統目前鎖定使用台灣時間 (UTC+8) 進行加密與傳輸。")
