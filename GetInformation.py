@@ -89,25 +89,35 @@ if st.button("🚀 執行全面同步", use_container_width=True):
 # --- 5. 數據顯示區 (使用 Session State 數據) ---
 if st.session_state.file_data is not None:
     tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
-    
-    with tab1:
-        df_file = pd.DataFrame(st.session_state.file_data)
-        if not df_file.empty:
-            # 🔍 模糊搜尋功能
-            search_query = st.text_input("🔍 搜尋檔案關鍵字 (輸入後按 Enter)", placeholder="輸入檔名、副檔名或日期...")
+with tab1:
+        if st.session_state.file_data:
+            # 1. 讀取資料並重新命名欄位
+            df_file = pd.DataFrame(st.session_state.file_data)
             
-            if search_query:
-                # 在所有欄位中搜尋
-                mask = df_file.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
-                df_filtered = df_file[mask]
-                st.caption(f"找到 {len(df_filtered)} 筆結果")
-                st.dataframe(df_filtered, use_container_width=True)
-            else:
-                st.caption(f"全部檔案共 {len(df_file)} 筆")
-                st.dataframe(df_file, use_container_width=True)
-        else:
-            st.warning("查無檔案數據。")
+            # 使用 rename 進行映射，errors='ignore' 確保如果欄位不存在不會報錯
+            df_file = df_file.rename(columns={
+                "name": "名稱",
+                "tags": "標籤"
+            })
 
+            if not df_file.empty:
+                # 🔍 模糊搜尋功能
+                search_query = st.text_input("🔍 搜尋檔案關鍵字 (輸入後按 Enter)", placeholder="輸入檔名、標籤關鍵字...")
+                
+                # 2. 搜尋邏輯 (針對重新命名後的 DataFrame)
+                if search_query:
+                    # 在所有欄位中搜尋 (包含現在叫作 '名稱' 和 '標籤' 的欄位)
+                    mask = df_file.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
+                    df_filtered = df_file[mask]
+                    st.caption(f"找到 {len(df_filtered)} 筆結果")
+                    st.dataframe(df_filtered, use_container_width=True)
+                else:
+                    st.caption(f"全部檔案共 {len(df_file)} 筆")
+                    st.dataframe(df_file, use_container_width=True)
+            else:
+                st.warning("查無檔案數據。")
+        else:
+            st.info("暫無資料，請先執行同步。")
     with tab2:
         if st.session_state.type_data:
             df_type = pd.DataFrame(st.session_state.type_data)
@@ -138,3 +148,4 @@ else:
 
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
+
