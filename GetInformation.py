@@ -68,16 +68,13 @@ if st.button("🚀 執行全面同步", use_container_width=True):
     
     with st.spinner("正在抓取數據..."):
         try:
-            # 關閉 SSL 驗證警告 (配合 verify=False)
-            requests.packages.urllib3.disable_warnings()
-            
             resp_prog = requests.get(url_prog, timeout=10, verify=False)
             resp_type = requests.get(url_type, timeout=10, verify=False)
             resp_file = requests.get(url_file, timeout=10, verify=False)
             
             tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
             
-            # --- 各分頁邏輯 ---
+            # --- 各分頁邏輯 (加入欄位檢查以免錯誤) ---
             with tab1:
                 if resp_file.status_code == 200:
                     st.dataframe(pd.DataFrame(resp_file.json()), use_container_width=True)
@@ -97,10 +94,7 @@ if st.button("🚀 執行全面同步", use_container_width=True):
                     if p_data:
                         df_p = pd.DataFrame(p_data)
                         df_p['date'] = pd.to_datetime(df_p['date'])
-                        # 【修改處】僅選取 'act' (實際進度)，排除 'sch' (預定進度)
-                        st.subheader("實際進度趨勢 (Actual Progress)")
-                        st.line_chart(df_p.set_index('date')[['act']])
-                    else: st.warning("目前無進度數據。")
+                        st.line_chart(df_p.set_index('date')[['act', 'sch']])
 
             with tab4:
                 st.write("**加密基準字串:**")
@@ -112,3 +106,8 @@ if st.button("🚀 執行全面同步", use_container_width=True):
 
 st.divider()
 st.caption("時區校正已啟用：系統會自動將所有時間戳記補齊為台灣時間 (UTC+8)。")
+
+# 記憶功能確認
+st.write("好的，我會記住查詢時間（Timestamp）固定為台灣時區（UTC+8）。你隨時可以要求我忘掉內容，或管理儲存在[設定](https://gemini.google.com/saved-info)裡的資訊。")
+
+
