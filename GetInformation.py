@@ -2,15 +2,18 @@ import streamlit as st
 import json
 import hashlib
 import datetime
-from datetime import timedelta, timezone
+from datetime import timedelta
 import requests
 import pandas as pd
+import numpy as np
+import plotly.graph_objs as go
 from urllib.parse import quote
+import io
 
 # 頁面配置
-st.set_page_config(page_title="HURC 台灣時區儀表板", layout="wide")
+st.set_page_config(page_title="HURC 數據監測整合版", layout="wide")
 
-# --- 核心加密函數 ---
+# --- 1. 核心函數 ---
 def generate_token(system, timestamp, key):
     data_dict = {'system': system, 'time': timestamp, 'key': key}
     data_str = json.dumps(data_dict)
@@ -18,120 +21,120 @@ def generate_token(system, timestamp, key):
     m.update(data_str.encode('utf-8'))
     return data_str, m.hexdigest().lower()
 
-# --- 取得台灣時間的函數 ---
 def get_tw_now():
-    # 取得當前 UTC 時間，並強制加上 8 小時
+    # 強制校正為台灣 UTC+8
     utc_now = datetime.datetime.now(datetime.timezone.utc)
     tw_now = utc_now + datetime.timedelta(hours=8)
     return tw_now.strftime("%Y-%m-%d %H:%M:%S")
 
-# --- 側邊欄設定 ---
+# --- 2. 初始化 Session State (防止搜尋時資料消失) ---
+if 'file_data' not in st.session_state:
+    st.session_state.file_data = None
+if 'type_data' not in st.session_state:
+    st.session_state.type_data = None
+if 'prog_data' not in st.session_state:
+    st.session_state.prog_data = None
+
+# --- 3. 側邊欄設定 ---
 with st.sidebar:
     st.header("🔑 系統參數")
     host = st.text_input("HOST", value="http://john.yilanlun.com:8000")
-    system_val = st.text_input("SYSTEM 名稱", value="PMISHURC")
+    system_val = st.text_input("SYSTEM", value="PMISHURC")
     token_key = st.text_input("TOKEN KEY", value="PF$@GESA@F(#!QG_@G@!_^%^C", type="password")
     project_id = st.text_input("PROJECT ID", value="214")
     
     st.divider()
-    st.subheader("🇹🇼 台灣時間控制 (UTC+8)")
-    
-    # 初始化：直接呼叫 +8 函數
+    st.subheader("🇹🇼 台灣時間控制")
     if 'current_ts' not in st.session_state:
         st.session_state.current_ts = get_tw_now()
 
-    # TIMESTAMP 編輯框
-    edited_ts = st.text_input("驗證時間戳記 (TIMESTAMP)", value=st.session_state.current_ts)
-    st.session_state.current_ts = edited_ts
-    
-    # DATE 查詢日期 (預設連動 TIMESTAMP 的日期)
-    default_date = edited_ts.split(" ")[0]
-    query_date = st.text_input("查詢日期 (DATE)", value=default_date)
+    edited_ts = st.text_input("驗證時間戳記", value=st.session_state.current_ts)
+    query_date = st.text_input("查詢日期 (DATE)", value=edited_ts.split(" ")[0])
 
-    if st.button("🕒 同步台灣目前時間 (+8)"):
+    if st.button("🕒 同步目前時間"):
         st.session_state.current_ts = get_tw_now()
         st.rerun()
 
-# --- 主畫面 ---
-st.title("🏗️ HURC 工程數據監測")
-st.info(f"🇹🇼 當前設定時間：`{edited_ts}` (已手動/自動校正為台灣 UTC+8)")
+# --- 4. 主畫面邏輯 ---
+st.title("🏗️ HURC 工程數據監測儀表板")
 
-# 計算 Token
+# 計算 Token 與 編碼
 raw_json, final_token = generate_token(system_val, edited_ts, token_key)
 ts_encoded = quote(edited_ts, safe="")
 
+# 同步按鈕
 if st.button("🚀 執行全面同步", use_container_width=True):
-    # 組合 API URLs
+    # API 網址組合
     url_prog = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_progress/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
     url_type = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_type_progress/?project_id={project_id}&date={query_date}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
     url_file = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/storage_file_list/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
     
     with st.spinner("正在抓取數據..."):
         try:
-            resp_prog = requests.get(url_prog, timeout=10, verify=False)
-            resp_type = requests.get(url_type, timeout=10, verify=False)
+            requests.packages.urllib3.disable_warnings() # 消除 SSL 警告
+            
             resp_file = requests.get(url_file, timeout=10, verify=False)
+            resp_type = requests.get(url_type, timeout=10, verify=False)
+            resp_prog = requests.get(url_prog, timeout=10, verify=False)
             
-            tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
+            # 將數據存入 Session State，這樣搜尋時才不會不見
+            if resp_file.status_code == 200: st.session_state.file_data = resp_file.json()
+            if resp_type.status_code == 200: st.session_state.type_data = resp_type.json()
+            if resp_prog.status_code == 200: st.session_state.prog_data = resp_prog.json()
             
-            # --- 各分頁邏輯 (加入欄位檢查以免錯誤) ---
-           # --- Tab 1: 檔案系統列表 (加入模糊搜尋功能) ---
-            with tab1:
-                if resp_file.status_code == 200:
-                    file_list = resp_file.json()
-                    df_file = pd.DataFrame(file_list)
-                    
-                    if not df_file.empty:
-                        # 🔍 模糊搜尋輸入框
-                        search_query = st.text_input("🔍 搜尋檔案名稱或關鍵字 (支援模糊比對)", placeholder="輸入關鍵字，例如：工程、報表、.jpg")
-                        
-                        # 搜尋邏輯：檢查所有文字欄位 (忽略大小寫)
-                        if search_query:
-                            # 建立一個遮罩，只要任一欄位包含關鍵字就顯示
-                            # 若只想搜尋特定欄位(如 'filename')，可改為 df_file['filename'].str.contains(...)
-                            mask = df_file.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)
-                            df_filtered = df_file[mask]
-                            
-                            st.caption(f"找到 {len(df_filtered)} 筆符合 `{search_query}` 的結果")
-                            st.dataframe(df_filtered, use_container_width=True)
-                        else:
-                            # 未搜尋時顯示全部
-                            st.caption(f"共有 {len(df_file)} 筆檔案")
-                            st.dataframe(df_file, use_container_width=True)
-                    else:
-                        st.warning("目前無任何檔案數據。")
-                else: 
-                    st.error("檔案列表讀取失敗")
-
-            with tab2:
-                if resp_type.status_code == 200:
-                    df_type = pd.DataFrame(resp_type.json())
-                    if not df_type.empty and 'delayed' in df_type.columns:
-                        st.dataframe(df_type, use_container_width=True)
-                        st.bar_chart(df_type.set_index('name')['delayed'])
-                    else: st.warning("該日期無分項進度。")
-
-            with tab3:
-                if resp_prog.status_code == 200:
-                    p_data = resp_prog.json().get('mix_data', [])
-                    if p_data:
-                        df_p = pd.DataFrame(p_data)
-                        df_p['date'] = pd.to_datetime(df_p['date'])
-                        st.line_chart(df_p.set_index('date')[['act', 'sch']])
-
-            with tab4:
-                st.write("**加密基準字串:**")
-                st.code(raw_json)
-                st.write("**目前 Token:**", final_token)
-
+            st.success("數據同步完成！")
         except Exception as e:
             st.error(f"連線異常：{str(e)}")
 
+# --- 5. 數據顯示區 (使用 Session State 數據) ---
+if st.session_state.file_data is not None:
+    tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
+    
+    with tab1:
+        df_file = pd.DataFrame(st.session_state.file_data)
+        if not df_file.empty:
+            # 🔍 模糊搜尋功能
+            search_query = st.text_input("🔍 搜尋檔案關鍵字 (輸入後按 Enter)", placeholder="輸入檔名、副檔名或日期...")
+            
+            if search_query:
+                # 在所有欄位中搜尋
+                mask = df_file.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
+                df_filtered = df_file[mask]
+                st.caption(f"找到 {len(df_filtered)} 筆結果")
+                st.dataframe(df_filtered, use_container_width=True)
+            else:
+                st.caption(f"全部檔案共 {len(df_file)} 筆")
+                st.dataframe(df_file, use_container_width=True)
+        else:
+            st.warning("查無檔案數據。")
+
+    with tab2:
+        if st.session_state.type_data:
+            df_type = pd.DataFrame(st.session_state.type_data)
+            if not df_type.empty and 'delayed' in df_type.columns:
+                st.dataframe(df_type, use_container_width=True)
+                st.bar_chart(df_type.set_index('name')['delayed'])
+            else:
+                st.warning("該日期無分項進度。")
+
+    with tab3:
+        if st.session_state.prog_data:
+            p_data = st.session_state.prog_data.get('mix_data', [])
+            if p_data:
+                df_p = pd.DataFrame(p_data)
+                df_p['date'] = pd.to_datetime(df_p['date'])
+                # 【修改】僅選取 act 實際進度
+                st.subheader("實際進度趨勢圖 (Actual)")
+                st.line_chart(df_p.set_index('date')[['act']])
+            else:
+                st.warning("無進度數據。")
+
+    with tab4:
+        st.write("**加密基準 JSON:**")
+        st.code(raw_json)
+        st.write("**目前 Token:**", final_token)
+else:
+    st.info("💡 請點擊上方「執行全面同步」按鈕以開始載入數據。")
+
 st.divider()
-st.caption("時區校正已啟用：系統會自動將所有時間戳記補齊為台灣時間 (UTC+8)。")
-
-# 記憶功能確認
-st.write("好的，我會記住查詢時間（Timestamp）固定為台灣時區（UTC+8）。你隨時可以要求我忘掉內容，或管理儲存在[設定](https://gemini.google.com/saved-info)裡的資訊。")
-
-
-
+st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
