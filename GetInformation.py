@@ -75,10 +75,33 @@ if st.button("🚀 執行全面同步", use_container_width=True):
             tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
             
             # --- 各分頁邏輯 (加入欄位檢查以免錯誤) ---
+           # --- Tab 1: 檔案系統列表 (加入模糊搜尋功能) ---
             with tab1:
                 if resp_file.status_code == 200:
-                    st.dataframe(pd.DataFrame(resp_file.json()), use_container_width=True)
-                else: st.error("檔案列表讀取失敗")
+                    file_list = resp_file.json()
+                    df_file = pd.DataFrame(file_list)
+                    
+                    if not df_file.empty:
+                        # 🔍 模糊搜尋輸入框
+                        search_query = st.text_input("🔍 搜尋檔案名稱或關鍵字 (支援模糊比對)", placeholder="輸入關鍵字，例如：工程、報表、.jpg")
+                        
+                        # 搜尋邏輯：檢查所有文字欄位 (忽略大小寫)
+                        if search_query:
+                            # 建立一個遮罩，只要任一欄位包含關鍵字就顯示
+                            # 若只想搜尋特定欄位(如 'filename')，可改為 df_file['filename'].str.contains(...)
+                            mask = df_file.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)
+                            df_filtered = df_file[mask]
+                            
+                            st.caption(f"找到 {len(df_filtered)} 筆符合 `{search_query}` 的結果")
+                            st.dataframe(df_filtered, use_container_width=True)
+                        else:
+                            # 未搜尋時顯示全部
+                            st.caption(f"共有 {len(df_file)} 筆檔案")
+                            st.dataframe(df_file, use_container_width=True)
+                    else:
+                        st.warning("目前無任何檔案數據。")
+                else: 
+                    st.error("檔案列表讀取失敗")
 
             with tab2:
                 if resp_type.status_code == 200:
@@ -109,5 +132,6 @@ st.caption("時區校正已啟用：系統會自動將所有時間戳記補齊�
 
 # 記憶功能確認
 st.write("好的，我會記住查詢時間（Timestamp）固定為台灣時區（UTC+8）。你隨時可以要求我忘掉內容，或管理儲存在[設定](https://gemini.google.com/saved-info)裡的資訊。")
+
 
 
