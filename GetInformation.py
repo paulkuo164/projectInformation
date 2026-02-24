@@ -2,15 +2,15 @@ import streamlit as st
 import json
 import hashlib
 import datetime
-from datetime import timedelta
+from datetime import timedelta, timezone
 import requests
 import pandas as pd
-import numpy as np
-import plotly.graph_objs as go
 from urllib.parse import quote
-import io
 
-# --- 1. 核心函數庫 ---
+# 頁面配置
+st.set_page_config(page_title="HURC 台灣時區儀表板", layout="wide")
+
+# --- 核心加密函數 ---
 def generate_token(system, timestamp, key):
     data_dict = {'system': system, 'time': timestamp, 'key': key}
     data_str = json.dumps(data_dict)
@@ -18,117 +18,96 @@ def generate_token(system, timestamp, key):
     m.update(data_str.encode('utf-8'))
     return data_str, m.hexdigest().lower()
 
+# --- 取得台灣時間的函數 ---
 def get_tw_now():
+    # 取得當前 UTC 時間，並強制加上 8 小時
     utc_now = datetime.datetime.now(datetime.timezone.utc)
     tw_now = utc_now + datetime.timedelta(hours=8)
     return tw_now.strftime("%Y-%m-%d %H:%M:%S")
 
-def get_month_end(dt):
-    import calendar
-    if pd.isna(dt) or dt is None: return None
-    dt = pd.to_datetime(dt)
-    last_day = calendar.monthrange(dt.year, dt.month)[1]
-    return dt.replace(day=last_day)
-
-def get_payment_date(dt):
-    if pd.isna(dt) or dt is None: return None
-    # 規則：次次月5號撥款
-    target_date = (pd.to_datetime(dt).replace(day=1) + pd.DateOffset(months=2))
-    return target_date.replace(day=5)
-
-# --- 2. 頁面配置與側邊欄 ---
-st.set_page_config(page_title="HURC 數據整合儀表板", layout="wide")
-
+# --- 側邊欄設定 ---
 with st.sidebar:
     st.header("🔑 系統參數")
     host = st.text_input("HOST", value="http://john.yilanlun.com:8000")
-    system_val = st.text_input("SYSTEM", value="PMISHURC")
+    system_val = st.text_input("SYSTEM 名稱", value="PMISHURC")
     token_key = st.text_input("TOKEN KEY", value="PF$@GESA@F(#!QG_@G@!_^%^C", type="password")
     project_id = st.text_input("PROJECT ID", value="214")
     
     st.divider()
+    st.subheader("🇹🇼 台灣時間控制 (UTC+8)")
+    
+    # 初始化：直接呼叫 +8 函數
     if 'current_ts' not in st.session_state:
         st.session_state.current_ts = get_tw_now()
-    edited_ts = st.text_input("驗證時間戳記", value=st.session_state.current_ts)
-    query_date = st.text_input("查詢日期", value=edited_ts.split(" ")[0])
 
-# --- 3. 準備 API 請求 ---
+    # TIMESTAMP 編輯框
+    edited_ts = st.text_input("驗證時間戳記 (TIMESTAMP)", value=st.session_state.current_ts)
+    st.session_state.current_ts = edited_ts
+    
+    # DATE 查詢日期 (預設連動 TIMESTAMP 的日期)
+    default_date = edited_ts.split(" ")[0]
+    query_date = st.text_input("查詢日期 (DATE)", value=default_date)
+
+    if st.button("🕒 同步台灣目前時間 (+8)"):
+        st.session_state.current_ts = get_tw_now()
+        st.rerun()
+
+# --- 主畫面 ---
+st.title("🏗️ HURC 工程數據監測")
+st.info(f"🇹🇼 當前設定時間：`{edited_ts}` (已手動/自動校正為台灣 UTC+8)")
+
+# 計算 Token
 raw_json, final_token = generate_token(system_val, edited_ts, token_key)
 ts_encoded = quote(edited_ts, safe="")
-base_url = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi"
 
-# --- 4. 主畫面邏輯 ---
-st.title("🏗️ HURC 工程資訊與金流預測整合")
-
-if st.button("🚀 執行全面同步分析", use_container_width=True):
-    # API 組合
-    url_info = f"{base_url}/project_detail/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
-    url_prog = f"{base_url}/dailyreport_progress/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
+if st.button("🚀 執行全面同步", use_container_width=True):
+    # 組合 API URLs
+    url_prog = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_progress/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
+    url_type = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_type_progress/?project_id={project_id}&date={query_date}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
+    url_file = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/storage_file_list/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
     
-    with st.spinner("正在串接 API 數據..."):
+    with st.spinner("正在抓取數據..."):
         try:
-            requests.packages.urllib3.disable_warnings()
-            res_info = requests.get(url_info, timeout=10, verify=False)
-            res_prog = requests.get(url_prog, timeout=10, verify=False)
+            resp_prog = requests.get(url_prog, timeout=10, verify=False)
+            resp_type = requests.get(url_type, timeout=10, verify=False)
+            resp_file = requests.get(url_file, timeout=10, verify=False)
             
-            if res_info.status_code == 200:
-                data = res_info.json()
-                
-                # --- 自動抓取基本資料 ---
-                # 注意：這裡的 Key 名稱 (contract_amount等) 需與 API 回傳格式一致
-                contract_amt = float(data.get('contract_amount', 0))
-                duration = int(data.get('duration_days', 0))
-                start_d = data.get('start_date', query_date)
-                case_name = data.get('project_name', '未命名案件')
-                
-                # 介面顯示
-                st.success(f"✅ 已成功串接案件：{case_name}")
-                col1, col2, col3 = st.columns(3)
-                col1.metric("契約總價", f"${contract_amt:,.0f}")
-                col2.metric("預計工期", f"{duration} 天")
-                col3.metric("開工日期", start_d)
-                
-                # --- 金流編輯區 ---
-                st.markdown("---")
-                st.subheader("💰 預估金流排程編輯")
-                
-                if 'design_df' not in st.session_state:
-                    st.session_state.design_df = pd.DataFrame([
-                        {"期別": "設計一期", "基準點": "合約起始", "相對月數": 3, "比例": 0.10},
-                        {"期別": "設計二期", "基準點": "合約起始", "相對月數": 6, "比例": 0.15},
-                        {"期別": "設計三期", "基準點": "合約起始", "相對月數": 9, "比例": 0.20},
-                        {"期別": "設計四期", "基準點": "預計開工", "相對月數": 6, "比例": 0.45},
-                        {"期別": "設計五期", "基準點": "預計完工", "相對月數": 1, "比例": 0.10},
-                    ])
+            tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
+            
+            # --- 各分頁邏輯 (加入欄位檢查以免錯誤) ---
+            with tab1:
+                if resp_file.status_code == 200:
+                    st.dataframe(pd.DataFrame(resp_file.json()), use_container_width=True)
+                else: st.error("檔案列表讀取失敗")
 
-                edited_df = st.data_editor(
-                    st.session_state.design_df,
-                    column_config={
-                        "基準點": st.column_config.SelectboxColumn("基準", options=["合約起始", "預計開工", "預計完工"]),
-                        "比例": st.column_config.NumberColumn("支付比例", format="%.2f", min_value=0.0, max_value=1.0)
-                    },
-                    num_rows="dynamic",
-                    key="main_editor"
-                )
+            with tab2:
+                if resp_type.status_code == 200:
+                    df_type = pd.DataFrame(resp_type.json())
+                    if not df_type.empty and 'delayed' in df_type.columns:
+                        st.dataframe(df_type, use_container_width=True)
+                        st.bar_chart(df_type.set_index('name')['delayed'])
+                    else: st.warning("該日期無分項進度。")
 
-                # --- 這裡可接續你原本的圖表繪製邏輯 ---
-                # 使用 contract_amt 進行運算...
-                st.info("💡 圖表連動功能已就緒，可依需求加入 S-Curve 或 Bar Chart。")
-                
-                # 只有進度圖表的部分 (移除預定進度 sch)
-                if res_prog.status_code == 200:
-                    p_data = res_prog.json().get('mix_data', [])
+            with tab3:
+                if resp_prog.status_code == 200:
+                    p_data = resp_prog.json().get('mix_data', [])
                     if p_data:
-                        st.subheader("📈 實際進度曲線 (不含預定)")
                         df_p = pd.DataFrame(p_data)
                         df_p['date'] = pd.to_datetime(df_p['date'])
-                        st.line_chart(df_p.set_index('date')[['act']])
+                        st.line_chart(df_p.set_index('date')[['act', 'sch']])
 
-            else:
-                st.error(f"API 請求失敗，錯誤碼：{res_info.status_code}")
-                
+            with tab4:
+                st.write("**加密基準字串:**")
+                st.code(raw_json)
+                st.write("**目前 Token:**", final_token)
+
         except Exception as e:
-            st.error(f"執行出錯：{str(e)}")
+            st.error(f"連線異常：{str(e)}")
 
 st.divider()
-st.caption("系統備註：所有數據均透過安全 Token 驗證並強制使用台灣時區 (+8)。")
+st.caption("時區校正已啟用：系統會自動將所有時間戳記補齊為台灣時間 (UTC+8)。")
+
+# 記憶功能確認
+st.write("好的，我會記住查詢時間（Timestamp）固定為台灣時區（UTC+8）。你隨時可以要求我忘掉內容，或管理儲存在[設定](https://gemini.google.com/saved-info)裡的資訊。")
+
+
