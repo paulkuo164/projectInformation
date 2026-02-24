@@ -89,25 +89,48 @@ if st.button("🚀 執行全面同步", use_container_width=True):
     if st.session_state.file_data is not None:
         tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
         
-        with tab1:
-            # 讀取並重新命名欄位
-            df_file = pd.DataFrame(st.session_state.file_data)
-            df_file = df_file.rename(columns={
-                "name": "名稱",
-                "tags": "標籤"
-            })
-
-            if not df_file.empty:
-                search_query = st.text_input("🔍 搜尋檔案關鍵字", placeholder="輸入名稱或標籤...")
+with tab1:
+            if st.session_state.file_data:
+                # 1. 讀取原始資料
+                df_raw = pd.DataFrame(st.session_state.file_data)
                 
-                if search_query:
-                    mask = df_file.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
-                    df_filtered = df_file[mask]
-                    st.dataframe(df_filtered, use_container_width=True)
+                # 2. 強制統一轉換 (解決大小寫或 key 不對的問題)
+                # 我們建立一個新 DataFrame，只抓我們要的資料
+                df_display = pd.DataFrame()
+                
+                # 檢查並抓取名稱欄位 (嘗試各種可能的 key)
+                for c in ["name", "Name", "filename", "fileName"]:
+                    if c in df_raw.columns:
+                        df_display["名稱"] = df_raw[c]
+                        break
+                
+                # 檢查並抓取標籤欄位
+                for c in ["tags", "Tags", "tag"]:
+                    if c in df_raw.columns:
+                        df_display["標籤"] = df_raw[c]
+                        break
+                
+                # 如果 df_display 還是空的，就顯示原樣 (保險機制)
+                if df_display.empty:
+                    df_display = df_raw.copy()
+
+                if not df_display.empty:
+                    # 🔍 模糊搜尋功能 (針對顯示出來的中文欄位搜尋)
+                    search_query = st.text_input("🔍 搜尋檔案關鍵字 (輸入後按 Enter)", placeholder="輸入名稱、標籤或日期...", key="file_search_input")
+                    
+                    if search_query:
+                        # 搜尋邏輯
+                        mask = df_display.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
+                        df_filtered = df_display[mask]
+                        st.caption(f"找到 {len(df_filtered)} 筆結果")
+                        st.dataframe(df_filtered, use_container_width=True)
+                    else:
+                        st.caption(f"全部檔案共 {len(df_display)} 筆")
+                        st.dataframe(df_display, use_container_width=True)
                 else:
-                    st.dataframe(df_file, use_container_width=True)
+                    st.warning("查無檔案數據。")
             else:
-                st.warning("查無檔案數據。")
+                st.info("💡 請先執行全面同步以載入資料。")
 
         with tab2: # ⬅️ 檢查這裡！必須與上面的 with tab1 對齊
             if st.session_state.type_data:
@@ -134,5 +157,6 @@ else:
 
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
+
 
 
