@@ -85,67 +85,54 @@ if st.button("🚀 執行全面同步", use_container_width=True):
             st.success("數據同步完成！")
         except Exception as e:
             st.error(f"連線異常：{str(e)}")
-
-# --- 5. 數據顯示區 (使用 Session State 數據) ---
-if st.session_state.file_data is not None:
-    tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
-with tab1:
-        if st.session_state.file_data:
-            # 1. 讀取資料並重新命名欄位
+# --- 5. 數據顯示區 ---
+    if st.session_state.file_data is not None:
+        tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
+        
+        with tab1:
+            # 讀取並重新命名欄位
             df_file = pd.DataFrame(st.session_state.file_data)
-            
-            # 使用 rename 進行映射，errors='ignore' 確保如果欄位不存在不會報錯
             df_file = df_file.rename(columns={
                 "name": "名稱",
                 "tags": "標籤"
             })
 
             if not df_file.empty:
-                # 🔍 模糊搜尋功能
-                search_query = st.text_input("🔍 搜尋檔案關鍵字 (輸入後按 Enter)", placeholder="輸入檔名、標籤關鍵字...")
+                search_query = st.text_input("🔍 搜尋檔案關鍵字", placeholder="輸入名稱或標籤...")
                 
-                # 2. 搜尋邏輯 (針對重新命名後的 DataFrame)
                 if search_query:
-                    # 在所有欄位中搜尋 (包含現在叫作 '名稱' 和 '標籤' 的欄位)
                     mask = df_file.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
                     df_filtered = df_file[mask]
-                    st.caption(f"找到 {len(df_filtered)} 筆結果")
                     st.dataframe(df_filtered, use_container_width=True)
                 else:
-                    st.caption(f"全部檔案共 {len(df_file)} 筆")
                     st.dataframe(df_file, use_container_width=True)
             else:
                 st.warning("查無檔案數據。")
-        else:
-            st.info("暫無資料，請先執行同步。")
-    with tab2:
-        if st.session_state.type_data:
-            df_type = pd.DataFrame(st.session_state.type_data)
-            if not df_type.empty and 'delayed' in df_type.columns:
-                st.dataframe(df_type, use_container_width=True)
-                st.bar_chart(df_type.set_index('name')['delayed'])
-            else:
-                st.warning("該日期無分項進度。")
 
-    with tab3:
-        if st.session_state.prog_data:
-            p_data = st.session_state.prog_data.get('mix_data', [])
-            if p_data:
-                df_p = pd.DataFrame(p_data)
-                df_p['date'] = pd.to_datetime(df_p['date'])
-                # 【修改】僅選取 act 實際進度
-                st.subheader("實際進度趨勢圖 (Actual)")
-                st.line_chart(df_p.set_index('date')[['act']])
-            else:
-                st.warning("無進度數據。")
+        with tab2: # ⬅️ 檢查這裡！必須與上面的 with tab1 對齊
+            if st.session_state.type_data:
+                df_type = pd.DataFrame(st.session_state.type_data)
+                if not df_type.empty:
+                    st.dataframe(df_type, use_container_width=True)
+                    if 'delayed' in df_type.columns and 'name' in df_type.columns:
+                        st.bar_chart(df_type.set_index('name')['delayed'])
+                else:
+                    st.warning("該日期無分項進度。")
 
-    with tab4:
-        st.write("**加密基準 JSON:**")
-        st.code(raw_json)
-        st.write("**目前 Token:**", final_token)
+        with tab3: # ⬅️ 同樣確保對齊
+            if st.session_state.prog_data:
+                p_data = st.session_state.prog_data.get('mix_data', [])
+                if p_data:
+                    df_p = pd.DataFrame(p_data)
+                    df_p['date'] = pd.to_datetime(df_p['date'])
+                    st.line_chart(df_p.set_index('date')[['act']])
+
+        with tab4:
+            st.write("**目前 Token:**", final_token)
 else:
     st.info("💡 請點擊上方「執行全面同步」按鈕以開始載入數據。")
 
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
+
 
