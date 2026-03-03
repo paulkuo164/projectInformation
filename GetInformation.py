@@ -174,25 +174,26 @@ if st.session_state.file_data is not None:
                 st.line_chart(df_p.set_index('date')[['act']])
             else:
                 st.warning("無進度數據。")
-
     with tab4:
-        st.write("**加密基準 JSON:**")
-        st.code(raw_json)
-        st.write("**目前 Token:**", final_token)
-
-    # --- 新增的 BIM 模型顯示 Tab ---
-    with tab5:
         st.subheader(f"🏗️ {selected_name} - Speckle BIM 檢視器")
         # 這是您剛才測試成功的官方 Embed Token 連結
         speckle_url = "https://app.speckle.systems/projects/5585173d48/models/a6fd6b49fa?embedToken=5824882a613eff8f10dfe8a44e26fbf24c115bfee7#embed=%7B%22isEnabled%22%3Atrue%7D"
         
         components.iframe(speckle_url, height=700, scrolling=False)
         st.caption("提示：點擊右側選單可切換樓層或篩選物件。")
+    with tab5:
+        st.write("**加密基準 JSON:**")
+        st.code(raw_json)
+        st.write("**目前 Token:**", final_token)
+
+    # --- 新增的 BIM 模型顯示 Tab ---
+
 
 else:
     st.info("💡 請點擊上方「執行全面同步」按鈕以開始載入數據。")
 
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
+
 
 
