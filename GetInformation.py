@@ -184,7 +184,7 @@ if st.session_state.file_data is not None:
     with tab5:
         st.subheader(f"🏗️ {selected_name} - Speckle BIM 檢視器")
         # 這是您剛才測試成功的官方 Embed Token 連結
-        speckle_url = "https://app.speckle.systems/projects/5585173d48/models/a6fd6b49fa?embedToken=b4703505b8decd7ecbc4c12df58138d68ecf56010c#embed=%7B%22isEnabled%22%3Atrue%2C%22isTransparent%22%3Atrue%2C%22hideControls%22%3Atrue%2C%22hideSelectionInfo%22%3Atrue%2C%22disableModelLink%22%3Atrue%7D"
+        speckle_url = "https://app.speckle.systems/projects/5585173d48/models/a6fd6b49fa?embedToken=5824882a613eff8f10dfe8a44e26fbf24c115bfee7#embed=%7B%22isEnabled%22%3Atrue%7D"
         
         components.iframe(speckle_url, height=700, scrolling=False)
         st.caption("提示：點擊右側選單可切換樓層或篩選物件。")
@@ -194,3 +194,4 @@ else:
 
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
+
