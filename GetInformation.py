@@ -197,18 +197,22 @@ else:
 st.divider()
 st.subheader("🏗️ BIM 模型實體檢視")
 
-# 將原本的 URL 轉換為嵌入專用的 URL
-# 原網址: https://app.speckle.systems/projects/5585173d48/models/a6fd6b49fa
-# 嵌入網址格式如下：
-speckle_embed_url = "https://app.speckle.systems/projects/5585173d48/models/a6fd6b49fa/embed"
+# 你的專案與模型 ID
+project_id = "5585173d48"
+model_id = "a6fd6b49fa"
 
-# 使用 components.iframe 嵌入
-components.iframe(speckle_embed_url, height=600, scrolling=False)
+# 使用舊版相容格式的嵌入網址
+# 這種格式通常能繞過新版 app.speckle.systems 的一些權限限制
+speckle_legacy_url = f"https://speckle.xyz/embed?stream={project_id}&branch={model_id}"
 
-st.caption("提示：您可以透過滑鼠旋轉、縮放模型，並點擊物件查看屬性。")
+# 執行嵌入
+components.iframe(speckle_legacy_url, height=600, scrolling=False)
+
+st.caption("提示：若畫面顯示拒絕連線，請檢查 Speckle 專案是否已在網頁版中開啟 'Link Sharing' 為 On。")
 
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
+
 
 
 
