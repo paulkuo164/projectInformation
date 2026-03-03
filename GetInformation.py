@@ -131,7 +131,7 @@ if st.button("🚀 執行全面同步", use_container_width=True):
 # --- 5. 數據顯示區 ---
 if st.session_state.file_data is not None:
     # 保留原功能並加入 tab5: 🏗️ 實體 BIM 模型
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷", "🏗️ 實體 BIM 模型"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🏗️ 實體 BIM 模型", "🛠️ 系統診斷"])
     
     with tab1:
         df_raw = pd.DataFrame(st.session_state.file_data)
@@ -194,6 +194,7 @@ else:
 
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
+
 
 
 
