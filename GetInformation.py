@@ -9,7 +9,7 @@ import numpy as np
 import plotly.graph_objs as go
 from urllib.parse import quote
 import io
-
+import streamlit.components.v1 as components
 # 頁面配置
 st.set_page_config(page_title="HURC 數據監測整合版", layout="wide")
 
@@ -193,6 +193,21 @@ if st.session_state.file_data is not None:
 else:
     st.info("💡 請點擊上方「執行全面同步」按鈕以開始載入數據。")
 
+# --- 6. Speckle BIM Viewer 嵌入區 ---
+st.divider()
+st.subheader("🏗️ BIM 模型實體檢視")
+
+# 將原本的 URL 轉換為嵌入專用的 URL
+# 原網址: https://app.speckle.systems/projects/5585173d48/models/a6fd6b49fa
+# 嵌入網址格式如下：
+speckle_embed_url = "https://app.speckle.systems/projects/5585173d48/models/a6fd6b49fa/embed"
+
+# 使用 components.iframe 嵌入
+components.iframe(speckle_embed_url, height=600, scrolling=False)
+
+st.caption("提示：您可以透過滑鼠旋轉、縮放模型，並點擊物件查看屬性。")
+
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
+
 
