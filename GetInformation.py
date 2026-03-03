@@ -103,7 +103,7 @@ with st.sidebar:
         st.rerun()
 
 # --- 4. 主畫面邏輯 ---
-st.title("🏗️ HURC 工程數據監測儀表板")
+st.title("🏗️ HURC 工程查核資訊板")
 
 raw_json, final_token = generate_token(system_val, edited_ts, token_key)
 ts_encoded = quote(edited_ts, safe="")
@@ -194,4 +194,5 @@ else:
 
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
+
 
