@@ -9,7 +9,7 @@ import numpy as np
 import plotly.graph_objs as go
 from urllib.parse import quote
 import io
-import streamlit.components.v1 as components
+
 # 頁面配置
 st.set_page_config(page_title="HURC 數據監測整合版", layout="wide")
 
@@ -193,29 +193,7 @@ if st.session_state.file_data is not None:
 else:
     st.info("💡 請點擊上方「執行全面同步」按鈕以開始載入數據。")
 
-import streamlit.components.v1 as components
-
-# --- 6. Speckle BIM Viewer 嵌入區 ---
-st.divider()
-st.subheader("🏗️ BIM 模型實體檢視")
-
-# 使用你提供的官方完整嵌入網址
-# 這個網址包含了授權 Token (embedToken)，能確保外部網頁順利載入
-speckle_official_url = "https://app.speckle.systems/projects/5585173d48/models/a6fd6b49fa?embedToken=b4703505b8decd7ecbc4c12df58138d68ecf56010c#embed=%7B%22isEnabled%22%3Atrue%2C%22isTransparent%22%3Atrue%2C%22hideControls%22%3Atrue%2C%22hideSelectionInfo%22%3Atrue%2C%22disableModelLink%22%3Atrue%7D"
-
-# 使用 components.iframe 嵌入
-# 建議高度設定為 600 或更高，以便獲得更好的視覺體驗
-components.iframe(speckle_official_url, height=700, scrolling=False)
-
-st.caption("提示：此 Viewer 使用官方 Embed Token 授權，支援透明背景與簡化介面。")
-st.caption(f"當前載入模型 ID: {model_id}")
-
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
-
-
-
-
-
 
 
