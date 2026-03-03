@@ -9,6 +9,7 @@ import numpy as np
 import plotly.graph_objs as go
 from urllib.parse import quote
 import io
+import streamlit.components.v1 as components  # 導入嵌入組件
 
 # 頁面配置
 st.set_page_config(page_title="HURC 數據監測整合版", layout="wide")
@@ -44,7 +45,6 @@ with st.sidebar:
     st.divider()
     st.subheader("🏢 專案選擇")
     
-    # 完整的 ID 對照表
     PROJECT_MAP = {
         "上林好室": "110", "大華安居A": "135", "大華安居B": "162", "山明安居": "111",
         "中美安居": "144", "中美好室": "85", "中雅安居": "82", "五谷好室A": "33",
@@ -86,14 +86,7 @@ with st.sidebar:
         "溪湖好室": "211", "大平安居": "213", "豐興安居": "218", "七賢安居": "219"
     }
     
-    # 使用 selectbox 讓使用者選擇名稱
-    selected_name = st.selectbox(
-        "請選擇專案名稱",
-        options=sorted(list(PROJECT_MAP.keys())), # 排序讓搜尋更方便
-        index=0
-    )
-    
-    # 根據選取的名稱獲得 ID
+    selected_name = st.selectbox("請選擇專案名稱", options=sorted(list(PROJECT_MAP.keys())), index=0)
     project_id = PROJECT_MAP[selected_name]
     st.info(f"📍 已選擇 ID: `{project_id}`")
     
@@ -115,7 +108,7 @@ st.title("🏗️ HURC 工程數據監測儀表板")
 raw_json, final_token = generate_token(system_val, edited_ts, token_key)
 ts_encoded = quote(edited_ts, safe="")
 
-# 同步按鈕：僅負責「抓取數據並存入 Session」
+# 同步按鈕
 if st.button("🚀 執行全面同步", use_container_width=True):
     url_prog = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_progress/?project_id={project_id}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
     url_type = f"{host.rstrip('/')}/rcm/api/v1/projectinfoapi/dailyreport_type_progress/?project_id={project_id}&date={query_date}&system={system_val}&timestamp={ts_encoded}&token={final_token}"
@@ -136,19 +129,14 @@ if st.button("🚀 執行全面同步", use_container_width=True):
         except Exception as e:
             st.error(f"連線異常：{str(e)}")
 
-# --- 5. 數據顯示區 (重要：縮排已退回，與 if st.button 平行) ---
+# --- 5. 數據顯示區 ---
 if st.session_state.file_data is not None:
-    tab1, tab2, tab3, tab4 = st.tabs(["📂 檔案系統列表", "📋 分項進度", "📈 總進度曲線", "🛠️ 系統診斷"])
+    # 這裡新增了第 5 個 Tab: 🏗️ 實體 BIM 模型
+    tab1, tab2, tab3, tab5, tab4 = st.tabs(["📂 檔案列表", "📋 分項進度", "📈 總進度曲線", "🏗️ 實體 BIM 模型", "🛠️ 系統診斷"])
     
     with tab1:
         df_raw = pd.DataFrame(st.session_state.file_data)
-        
-        # 欄位改名邏輯
-        rename_dict = {}
-        for col in df_raw.columns:
-            if col.lower() == 'name': rename_dict[col] = "名稱"
-            if col.lower() == 'tags': rename_dict[col] = "標籤"
-        
+        rename_dict = {'name': "名稱", 'tags': "標籤"}
         df_display = df_raw.rename(columns=rename_dict)
         display_cols = [c for c in ["名稱", "標籤"] if c in df_display.columns]
         if display_cols:
@@ -156,15 +144,11 @@ if st.session_state.file_data is not None:
 
         if not df_display.empty:
             search_query = st.text_input("🔍 搜尋檔案關鍵字", placeholder="輸入名稱或標籤...", key="file_search_input")
-            
             if search_query:
                 mask = df_display.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
-                df_filtered = df_display[mask]
-                st.dataframe(df_filtered, use_container_width=True)
+                st.dataframe(df_display[mask], use_container_width=True)
             else:
                 st.dataframe(df_display, use_container_width=True)
-        else:
-            st.warning("查無檔案數據。")
 
     with tab2:
         if st.session_state.type_data:
@@ -173,8 +157,6 @@ if st.session_state.file_data is not None:
                 st.dataframe(df_type, use_container_width=True)
                 if 'delayed' in df_type.columns and 'name' in df_type.columns:
                     st.bar_chart(df_type.set_index('name')['delayed'])
-            else:
-                st.warning("該日期無分項進度。")
 
     with tab3:
         if st.session_state.prog_data:
@@ -183,17 +165,22 @@ if st.session_state.file_data is not None:
                 df_p = pd.DataFrame(p_data)
                 df_p['date'] = pd.to_datetime(df_p['date'])
                 st.line_chart(df_p.set_index('date')[['act']])
-            else:
-                st.warning("無進度數據。")
+
+    # --- 新增模型 Tab 內容 ---
+    with tab5:
+        st.subheader("🏗️ Speckle BIM 實體模型檢視")
+        # 使用您測試成功的完整 Token 網址
+        speckle_url = "https://app.speckle.systems/projects/5585173d48/models/a6fd6b49fa?embedToken=b4703505b8decd7ecbc4c12df58138d68ecf56010c#embed=%7B%22isEnabled%22%3Atrue%2C%22isTransparent%22%3Atrue%2C%22hideControls%22%3Atrue%2C%22hideSelectionInfo%22%3Atrue%2C%22disableModelLink%22%3Atrue%7D"
+        
+        components.iframe(speckle_url, height=700, scrolling=False)
+        st.caption("提示：點擊模型物件可查看屬性，右鍵可旋轉視角。")
 
     with tab4:
         st.write("**加密基準 JSON:**")
         st.code(raw_json)
         st.write("**目前 Token:**", final_token)
 else:
-    st.info("💡 請點擊上方「執行全面同步」按鈕以開始載入數據。")
+    st.info("💡 請點擊上方「執行全面同步」按鈕以開始載入數據與模型。")
 
 st.divider()
 st.caption("時區校正：UTC+8 (Taipei) | 搜尋連動：已啟用 Session 緩存機制")
-
-
